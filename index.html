@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Remind</title>
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Remind</h1>
+    </header>
+    <div class="controls">
+      <input type="text" id="search-input" placeholder="Search Reminders">
+      <select id="sort-select">
+        <option value="remaining-asc">Remaining Time (Soonest)</option>
+        <option value="remaining-desc">Remaining Time (Latest)</option>
+        <option value="name-asc">Name Ascending</option>
+        <option value="name-desc">Name Descending</option>
+      </select>
+      <button id="add-button">Add Reminder</button>
+      <button id="export-button">Export Reminders</button>
+      <button id="import-button">Import Reminders</button>
+      <button id="clear-button">Clear Everything</button>
+      <!-- Hidden file input for importing -->
+      <input type="file" id="import-file" accept=".json" style="display:none">
+    </div>
+    <div class="table-container">
+      <table id="reminders-table">
+        <thead>
+          <tr>
+            <th>Countdown</th>
+            <th>Title</th>
+            <th>Event Date/Time</th>
+            <th>Priority</th>            
+            <th>Description</th>
+            <th>UUID</th>
+            <th>Frequency (Cron / Fixed)</th>
+            <th>Type</th>
+            <th>Creation Date</th>
+            <th>Modification Date</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Reminders will be dynamically injected here -->
+        </tbody>
+      </table>
+    </div>
+    <!-- Modal for adding/editing reminder -->
+    <div id="modal" class="modal">
+      <div class="modal-content">
+        <span id="close-modal" class="close">&times;</span>
+        <form id="reminder-form">
+          <input type="hidden" id="reminder-id">
+          <input type="hidden" id="reminder-creationDate">
+          <input type="text" id="reminder-name" placeholder="Reminder Title" required maxlength="30">
+          <textarea id="reminder-desc" placeholder="Description" maxlength="600"></textarea>
+          <select id="reminder-type" required>
+            <option value="frequency">Frequency</option>
+            <option value="punctual">Punctual</option>
+          </select>
+          <!-- Frequency-specific section (shown when type == frequency) -->
+          <div id="frequency-section" style="display:none; border:1px solid #444; padding:0.5rem; margin-top:0.5rem;">
+            <h3 style="margin:0.5rem 0;">Frequency Options</h3>
+            <!-- Two radio options: Specific Date or Custom Frequency -->
+            <div>
+              <label>
+                <input type="radio" name="frequency-option" value="fixed" checked>
+                Specific Date
+              </label>
+              <label>
+                <input type="radio" name="frequency-option" value="cron">
+                Custom Frequency (Cron Builder)
+              </label>
+            </div>
+            <!-- Specific Date Inputs -->
+            <div id="fixed-frequency" style="margin-top:0.5rem;">
+              <input type="number" id="fixed-month" placeholder="Month (1-12)" min="1" max="12">
+              <input type="number" id="fixed-day" placeholder="Day (1-31)" min="1" max="31">
+              <input type="number" id="fixed-hour" placeholder="Hour (0-23)" min="0" max="23">
+              <input type="number" id="fixed-minute" placeholder="Minute (0-59)" min="0" max="59">
+              <div id="fixed-display" style="margin-top:0.5rem; font-size:1.2rem; color:#ccc;"></div>
+            </div>
+            <!-- Cron Builder -->
+            <div id="cron-builder" style="display:none; margin-top:0.5rem;">
+              <div>
+                <label>Minute:</label>
+                <select class="cron-field" data-field="minute">
+                  <option value="*">Every</option>
+                  <option value="at">At</option>
+                  <option value="?">Disabled</option>
+                </select>
+                <input type="number" class="cron-input" data-field="minute" placeholder="0-59" min="0" max="59" style="display:none;">
+              </div>
+              <div>
+                <label>Hour:</label>
+                <select class="cron-field" data-field="hour">
+                  <option value="*">Every</option>
+                  <option value="at">At</option>
+                  <option value="?">Disabled</option>
+                </select>
+                <input type="number" class="cron-input" data-field="hour" placeholder="0-23" min="0" max="23" style="display:none;">
+              </div>
+              <div>
+                <label>Day of Month:</label>
+                <select class="cron-field" data-field="dom">
+                  <option value="*">Every</option>
+                  <option value="at">At</option>
+                  <option value="?">Disabled</option>
+                </select>
+                <input type="number" class="cron-input" data-field="dom" placeholder="1-31" min="1" max="31" style="display:none;">
+              </div>
+              <div>
+                <label>Month:</label>
+                <select class="cron-field" data-field="month">
+                  <option value="*">Every</option>
+                  <option value="at">At</option>
+                  <option value="?">Disabled</option>
+                </select>
+                <input type="number" class="cron-input" data-field="month" placeholder="1-12" min="1" max="12" style="display:none;">
+              </div>
+              <div>
+                <label>Day of Week:</label>
+                <select class="cron-field" data-field="dow">
+                  <option value="*">Every</option>
+                  <option value="at">At</option>
+                  <option value="?">Disabled</option>
+                </select>
+                <input type="number" class="cron-input" data-field="dow" placeholder="0-6" min="0" max="6" style="display:none;">
+              </div>
+              <div id="cron-display" style="margin-top:0.5rem; font-size:1.2rem; color:#ccc;"></div>
+            </div>
+          </div>
+          <!-- For punctual type -->
+          <input type="datetime-local" id="reminder-dueDate" style="display:none" placeholder="Due Date">
+          <select id="reminder-priority" required>
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <button type="submit">Save Reminder</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <script src="styles.js" defer></script>
+  <script src="uuid.js" defer></script>
+  <script src="db.js" defer></script>
+  <script src="main.js" defer></script>
+</body>
+</html>
