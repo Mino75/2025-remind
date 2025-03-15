@@ -1,5 +1,5 @@
 const LIVE_CACHE = 'remind-v1';
-const TEMP_CACHE = 'remind-v1';
+const TEMP_CACHE = 'remind-temp-v1';
 const ASSETS = [
   '/',
   '/index.html',
