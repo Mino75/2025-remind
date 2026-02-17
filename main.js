@@ -2,10 +2,13 @@
 
 document.addEventListener('DOMContentLoaded', async () => {
   const dbInstance = await window.dbAPI.openDB();
-  const storeName = window.dbAPI.storeName || 'tasks'; // kept for compatibility (your db.js uses "Reminders")
+
+  // IMPORTANT: your db.js uses STORE_NAME = "Reminders"
+  // Using any other store name breaks transactions (ex: Clear Everything)
+  const storeName = 'Reminders';
 
   // ---------- Constants ----------
-  const EMOJI_CHOICES = ["🥷", "🧙‍♂️", "🧞‍♀️", "🧜‍♀️", "🧝‍♂️", "🧚🏻", "🤖", "👨‍💻", "👩‍🏫", "🧑‍🌾", "👨‍🔬", "👨‍🔬"];
+  const EMOJI_CHOICES = ["🥷", "🧙‍♂️", "🧞‍♀️", "🧜‍♀️", "🧝‍♂️", "🧚🏻", "🤖", "👨‍💻", "👩‍🏫", "🧑‍🌾", "👨‍🔬", "🧭"];
   const INTENT_PRESETS = [
     { key: "youtube", label: "YouTube", url: "https://www.youtube.com" },
     { key: "spotify", label: "Spotify", url: "https://open.spotify.com" },
@@ -84,12 +87,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   injectWebActionOverlay();
 
   // ---------- Extend Add Modal: new fields (no HTML change) ----------
-  // Adds optional fields to the existing form: duration, happiness, sadness, money, action type/url/intent, endDate, activityKind
   const extraFields = injectExtraFieldsIntoForm(reminderForm);
 
-  // ---------- Event wiring (existing + updated behaviors) ----------
-  loadReminders();
-
+  // ---------- Event wiring ----------
   reminderTypeField.addEventListener('change', () => {
     if (reminderTypeField.value === 'frequency') {
       frequencySection.style.display = 'block';
@@ -101,7 +101,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   reminderTypeField.dispatchEvent(new Event('change'));
 
-  freqOptionRadios.forEach(radio => {
+  // FIX: getElementsByName() doesn't reliably support .forEach
+  Array.from(freqOptionRadios).forEach(radio => {
     radio.addEventListener('change', () => {
       if (radio.value === 'fixed' && radio.checked) {
         fixedFrequencyDiv.style.display = 'block';
@@ -128,7 +129,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
   cronInputs.forEach(input => input.addEventListener('input', updateCronDisplay));
-
   [fixedMonthField, fixedDayField, fixedHourField, fixedMinuteField].forEach(el => el.addEventListener('input', updateFixedDisplay));
 
   // Open modal for new reminder (no edit)
@@ -137,11 +137,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     reminderIdField.value = "";
     reminderCreationDateField.value = "";
 
-    // default frequency UI state
-    document.querySelector('input[name="frequency-option"][value="fixed"]').checked = true;
+    // Reset frequency section defaults
+    const fixedRadio = document.querySelector('input[name="frequency-option"][value="fixed"]');
+    if (fixedRadio) fixedRadio.checked = true;
+
     fixedFrequencyDiv.style.display = 'block';
     cronBuilderDiv.style.display = 'none';
     fixedDisplayDiv.textContent = "";
+
     cronFieldSelects.forEach(select => {
       select.value = "*";
       const input = document.querySelector(`.cron-input[data-field="${select.getAttribute('data-field')}"]`);
@@ -150,7 +153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     updateCronDisplay();
 
-    // default extra fields
+    // Extra defaults
     extraFields.durationMinutes.value = "30";
     extraFields.happinessDelta.value = "0";
     extraFields.sadnessDelta.value = "0";
@@ -169,11 +172,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   closeModal.addEventListener('click', () => { modal.style.display = 'none'; });
   window.addEventListener('click', (event) => { if (event.target === modal) modal.style.display = 'none'; });
 
-  // Search/sort reload
+  // Update list on search/sort changes
   searchInput.addEventListener('input', loadReminders);
   sortSelect.addEventListener('change', loadReminders);
 
-  // Save reminder (create-only; if an imported reminder includes uuid collision it will be merged via import logic)
   reminderForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     const now = Date.now();
@@ -183,7 +185,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     let frequencyDisplay = "-";
 
     if (type === 'frequency') {
-      const selectedOption = document.querySelector('input[name="frequency-option"]:checked').value;
+      const selectedOptionEl = document.querySelector('input[name="frequency-option"]:checked');
+      const selectedOption = selectedOptionEl ? selectedOptionEl.value : 'fixed';
+
       if (selectedOption === 'fixed') {
         const month = parseInt(fixedMonthField.value);
         const day = parseInt(fixedDayField.value);
@@ -197,6 +201,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           alert("Please enter valid fixed date values.");
           return;
         }
+
         dueTime = computeNextOccurrenceFixed(month, day, hour, minute);
         const frequencyMinutes = Math.max(1, Math.round((dueTime - now) / 60000));
         frequencyDisplay = `${frequencyMinutes} min (Fixed: ${minute} ${hour} on ${day}/${month})`;
@@ -215,7 +220,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       dueTime = new Date(dueDateValue).getTime();
     }
 
-    // Extra fields (optional, safe to add)
+    // Extra fields (optional)
     const durationMinutes = clampInt(extraFields.durationMinutes.value, 0, 24 * 60, 30);
     const happinessDelta = clampInt(extraFields.happinessDelta.value, -100, 100, 0);
     const sadnessDelta = clampInt(extraFields.sadnessDelta.value, -100, 100, 0);
@@ -245,7 +250,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           return;
         }
         actionIntent = custom;
-        actionUrl = custom; // for web fallback
+        actionUrl = custom;
       } else {
         const found = INTENT_PRESETS.find(x => x.key === preset);
         actionIntent = preset;
@@ -255,33 +260,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const reminder = {
-      // Keep existing fields
       uuid: reminderIdField.value || generateUUID(),
       name: reminderNameField.value,
       description: reminderDescField.value,
-      type: type, // punctual | frequency
+      type: type,
       frequency: type === 'frequency' ? frequencyDisplay : '-',
       dueTime: dueTime,
       priority: reminderPriorityField.value,
       modificationDate: now,
 
-      // New optional fields (do not break existing data)
+      // Optional fields (schema-safe)
       durationMinutes,
       happinessDelta,
       sadnessDelta,
       moneyEUR,
       activityKind,
-      endDate, // nullable
+      endDate,
       actionType,
       actionUrl,
       actionIntent,
 
-      // Archive flag fallback (keeps requirement “do not delete outdated”; true archive store needs db.js upgrade)
+      // Soft-archive flag (fallback)
       archived: false
     };
 
-    // Create-only: if reminderIdField has a value we still support update for compatibility,
-    // but UI no longer exposes edit.
     if (reminderIdField.value) {
       reminder.creationDate = parseInt(reminderCreationDateField.value);
       await window.dbAPI.updateTask(reminder);
@@ -400,8 +402,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Soft archive filter: do not show archived by default
     reminders = reminders.filter(r => !r.archived);
 
-    // Auto-archive punctual tasks > 7 days past due (requirement: do not delete; archive)
-    // Note: "archive to another collection" requires db.js upgrade; this fallback uses archived=true.
+    // Auto-archive punctual reminders > 7 days past due
     const toArchive = reminders.filter(r => r.type === 'punctual' && now > (r.dueTime + 7 * 24 * 60 * 60000));
     if (toArchive.length) {
       await Promise.allSettled(toArchive.map(r => softArchiveTask(r.uuid)));
@@ -430,10 +431,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderHUD(reminders);
   }
 
-  // Light table: Countdown, Title, Event, Priority, Description, Duration, Money, Action
-  // Details popup on row click for: type, creationDate, modificationDate, uuid, frequency, etc.
   function renderReminders(reminders) {
-    // Update headers (non-destructive; safe if already customized)
     const theadRow = document.querySelector('#reminders-table thead tr');
     if (theadRow) {
       theadRow.innerHTML = `
@@ -493,7 +491,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const durationLabel = `${safeNumber(reminder.durationMinutes, 0)} min`;
       const moneyLabel = formatEUR(reminder.moneyEUR);
-
       const actionLabel = renderActionLabel(reminder);
 
       const tr = document.createElement('tr');
@@ -511,12 +508,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         <td>${actionLabel}</td>
       `;
 
-      // Row click => details modal (and action click remains actionable)
+      // Row click => details modal
       tr.addEventListener('click', async (evt) => {
-        // Avoid row-click if user clicks a button/link inside action cell
         const target = evt.target;
         if (target && (target.closest?.('.action-btn') || target.closest?.('.action-link'))) return;
-
         const details = await getTaskByUuid(reminder.uuid);
         openDetailsModal(details);
       });
@@ -545,7 +540,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---------- Details Modal ----------
   async function getTaskByUuid(uuid) {
-    // dbAPI does not expose get(uuid); so fetch all and find (safe for small data, your UI paginates anyway)
     const all = await window.dbAPI.getAllTasks();
     return all.find(r => r.uuid === uuid) || null;
   }
@@ -594,11 +588,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       </div>
     `;
 
-    // Buttons
-    const closeBtn = document.getElementById('details-close-btn');
-    const archiveBtn = document.getElementById('details-archive-btn');
-    closeBtn?.addEventListener('click', () => { modalEl.style.display = 'none'; });
-    archiveBtn?.addEventListener('click', async () => {
+    document.getElementById('details-close-btn')?.addEventListener('click', () => {
+      modalEl.style.display = 'none';
+    });
+
+    document.getElementById('details-archive-btn')?.addEventListener('click', async () => {
       await softArchiveTask(task.uuid);
       modalEl.style.display = 'none';
       loadReminders();
@@ -612,9 +606,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const all = await window.dbAPI.getAllTasks();
     const t = all.find(x => x.uuid === uuid);
     if (!t) return;
-
-    // If you later add a real archive collection in db.js (Archive store),
-    // you can replace this with dbAPI.archiveTask(uuid) without changing UI.
     t.archived = true;
     t.modificationDate = Date.now();
     await window.dbAPI.updateTask(t);
@@ -626,40 +617,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!hud) return;
 
     const now = new Date();
-    const week = getWeekWindow(now); // [startMs, endMs)
+    const week = getWeekWindow(now);
     const weekTasks = activeTasks.filter(t => isTaskRelevantInWindow(t, week.start, week.end));
 
-    // Time budget
     const totalWeekHours = 7 * 24;
-    const sleepWeekHours = settings.sleepHoursPerDay * 7;
-    const workWeekHours = settings.workHoursPerDay * clampInt(settings.workDaysPerWeek, 0, 7, 5);
+    const sleepWeekHours = safeNumber(settings.sleepHoursPerDay, 7) * 7;
+    const workWeekHours = safeNumber(settings.workHoursPerDay, 8) * clampInt(settings.workDaysPerWeek, 0, 7, 5);
+
     const plannedMinutesWeek = estimatePlannedMinutesInWindow(weekTasks, week.start, week.end);
     const plannedHoursWeek = plannedMinutesWeek / 60;
 
     const freeHoursWeek = Math.max(0, totalWeekHours - sleepWeekHours - workWeekHours - plannedHoursWeek);
     const freePct = percent(freeHoursWeek, Math.max(1, totalWeekHours - sleepWeekHours - workWeekHours));
 
-    // Strength (exercise)
     const exerciseMinutes = estimateExerciseMinutesInWindow(weekTasks, week.start, week.end);
-    const maxActiveMinutes = Math.max(1, (24 - settings.sleepHoursPerDay) * 7 * 60);
+    const maxActiveMinutes = Math.max(1, (24 - safeNumber(settings.sleepHoursPerDay, 7)) * 7 * 60);
     const strengthPct = Math.min(100, Math.round((exerciseMinutes / maxActiveMinutes) * 100));
 
-    // Mood
     const happiness = sumFieldInWindow(weekTasks, "happinessDelta", week.start, week.end);
     const sadness = sumFieldInWindow(weekTasks, "sadnessDelta", week.start, week.end);
-    const happinessPct = clampInt(Math.round(50 + happiness), 0, 100, 50); // centered scale
+    const happinessPct = clampInt(Math.round(50 + happiness), 0, 100, 50);
     const sadnessPct = clampInt(Math.round(50 + sadness), 0, 100, 50);
 
-    // Money (month balance)
     const month = getMonthWindow(now);
     const monthTasks = activeTasks.filter(t => isTaskRelevantInWindow(t, month.start, month.end));
     const moneyNet = sumMoneyInWindow(monthTasks, month.start, month.end) + safeNumber(settings.monthlySalaryEUR, 0);
-    const moneyPct = clampInt(Math.round(50 + moneyNet / 100), 0, 100, 50); // heuristic
+    const moneyPct = clampInt(Math.round(50 + moneyNet / 100), 0, 100, 50);
 
-    // Daily remaining time (next 7 days)
     const daily = computeDailyRemaining(activeTasks, settings);
 
-    // Render
     const emojiSelect = renderEmojiSelect(settings.emoji);
     const settingsPanel = renderSettingsPanel(settings);
 
@@ -738,7 +724,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---------- HUD + modal + overlay injection ----------
   function injectHUD() {
-    const container = document.querySelector('.container') || document.body;
+    // Use body for fixed HUD so it won't be clipped by container overflow
+    const container = document.body;
+
+    // Prevent duplicate injection on hot reloads
+    if (document.getElementById('character-hud')) return;
 
     const hud = document.createElement('div');
     hud.id = 'character-hud';
@@ -746,7 +736,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     hud.style.top = '14px';
     hud.style.right = '14px';
     hud.style.width = '340px';
-    hud.style.zIndex = '9999';
+    hud.style.zIndex = '999999';
     hud.style.background = 'rgba(12,12,12,0.92)';
     hud.style.border = '1px solid #333';
     hud.style.borderRadius = '16px';
@@ -760,14 +750,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function injectDetailsModal() {
-    // Lightweight overlay modal dedicated to details (no conflict with add modal)
+    if (document.getElementById('details-modal')) return;
+
     const modalWrap = document.createElement('div');
     modalWrap.id = 'details-modal';
     modalWrap.style.display = 'none';
     modalWrap.style.position = 'fixed';
     modalWrap.style.inset = '0';
     modalWrap.style.background = 'rgba(0,0,0,0.55)';
-    modalWrap.style.zIndex = '10000';
+    modalWrap.style.zIndex = '1000000';
 
     modalWrap.innerHTML = `
       <div style="max-width:720px; margin:60px auto; background:#111; border:1px solid #333; border-radius:16px; padding:14px;">
@@ -789,13 +780,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function injectWebActionOverlay() {
+    if (document.getElementById('web-overlay')) return;
+
     const overlay = document.createElement('div');
     overlay.id = 'web-overlay';
     overlay.style.display = 'none';
     overlay.style.position = 'fixed';
     overlay.style.inset = '0';
-    overlay.style.zIndex = '11000';
-    overlay.style.pointerEvents = 'none'; // inner window will handle
+    overlay.style.zIndex = '1100000';
+    overlay.style.pointerEvents = 'none';
 
     overlay.innerHTML = `
       <div id="web-window"
@@ -814,7 +807,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     `;
     document.body.appendChild(overlay);
 
-    // Drag behavior
     const win = overlay.querySelector('#web-window');
     const bar = overlay.querySelector('#web-titlebar');
     let dragging = false;
@@ -840,7 +832,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     window.addEventListener('mouseup', () => { dragging = false; });
 
-    overlay.querySelector('#web-close').addEventListener('click', () => {
+    overlay.querySelector('#web-close')?.addEventListener('click', () => {
       overlay.style.display = 'none';
       overlay.querySelector('#web-iframe').src = 'about:blank';
     });
@@ -856,6 +848,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---------- Extra fields injection into add form ----------
   function injectExtraFieldsIntoForm(formEl) {
+    // Prevent duplicates
+    if (document.getElementById('reminder-durationMinutes')) {
+      return {
+        durationMinutes: document.getElementById('reminder-durationMinutes'),
+        activityKind: document.getElementById('reminder-activityKind'),
+        happinessDelta: document.getElementById('reminder-happinessDelta'),
+        sadnessDelta: document.getElementById('reminder-sadnessDelta'),
+        moneyEUR: document.getElementById('reminder-moneyEUR'),
+        endDate: document.getElementById('reminder-endDate'),
+        actionType: document.getElementById('reminder-actionType'),
+        actionUrl: document.getElementById('reminder-actionUrl'),
+        intentPreset: document.getElementById('reminder-intentPreset'),
+        intentCustom: document.getElementById('reminder-intentCustom'),
+        blocks: {
+          actionUrl: document.getElementById('action-url-block'),
+          intent: document.getElementById('intent-block'),
+          intentCustom: document.getElementById('intent-custom-block')
+        }
+      };
+    }
+
     const wrap = document.createElement('div');
     wrap.style.marginTop = '10px';
     wrap.style.borderTop = '1px solid #333';
@@ -964,7 +977,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const preset = fields.intentPreset.value;
       fields.blocks.intentCustom.style.display = (t === 'link-intent' && preset === 'custom') ? 'block' : 'none';
     }
-    // expose to outer scope
+
     window.syncActionFieldsVisibility = syncActionFieldsVisibility;
     syncActionFieldsVisibility();
 
@@ -972,11 +985,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function syncActionFieldsVisibility() {
-    // placeholder replaced by injected function
     if (typeof window.syncActionFieldsVisibility === "function") window.syncActionFieldsVisibility();
   }
 
-  // ---------- Cron helpers (existing logic preserved) ----------
+  // ---------- Cron helpers ----------
   function updateCronDisplay() {
     const fields = ['minute', 'hour', 'dom', 'month', 'dow'];
     let cronParts = [];
@@ -1063,7 +1075,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   function formatEUR(v) {
     const n = safeNumber(v, 0);
-    // Avoid Intl assumptions; keep stable formatting
     const sign = n < 0 ? "-" : "";
     const abs = Math.abs(n);
     return `${sign}${abs.toFixed(2)}`;
@@ -1071,7 +1082,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function normalizeUrl(url) {
     if (!url) return url;
     const u = url.trim();
-    if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(u)) return u; // already has scheme
+    if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(u)) return u;
     if (u.startsWith("intent://") || u.startsWith("myapp://")) return u;
     return `https://${u}`;
   }
@@ -1149,7 +1160,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ---------- Time windows / estimation ----------
   function getWeekWindow(dateObj) {
-    // Monday-based week
     const d = new Date(dateObj);
     const day = d.getDay(); // 0..6 (Sun..Sat)
     const diffToMonday = (day === 0 ? -6 : 1) - day;
@@ -1170,26 +1180,19 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function isTaskRelevantInWindow(task, startMs, endMs) {
     if (!task || task.archived) return false;
-
-    // End date: if exists and already passed before window start, ignore
     if (task.endDate && task.endDate < startMs) return false;
 
     if (task.type === "punctual") {
       return task.dueTime >= startMs && task.dueTime < endMs;
     }
     if (task.type === "frequency") {
-      // relevant if next due is inside, or if frequency suggests recurring within window
       if (task.dueTime >= startMs && task.dueTime < endMs) return true;
-
-      // For frequency tasks, treat as ongoing unless endDate stops it
       return task.dueTime < endMs;
     }
     return false;
   }
 
   function estimatePlannedMinutesInWindow(tasks, startMs, endMs) {
-    // Punctual: sum duration if dueTime in window
-    // Frequency: estimate occurrences based on stored "X min (...)" prefix (best-effort, bounded)
     let total = 0;
     for (const t of tasks) {
       const dur = safeNumber(t.durationMinutes, 0);
@@ -1202,7 +1205,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           const occ = Math.min(200, Math.max(1, Math.floor(windowMins / freqMins)));
           total += dur * occ;
         } else {
-          // fallback: count once per window
           total += dur;
         }
       }
@@ -1262,7 +1264,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function parseLeadingFrequencyMinutes(freqDisplay) {
     if (!freqDisplay) return null;
-    // expected: "X min (Fixed: ...)" or "X min (Cron: ...)"
     const m = String(freqDisplay).match(/^(\d+)\s*min\b/i);
     if (!m) return null;
     const n = parseInt(m[1], 10);
@@ -1281,11 +1282,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const end = start + 24 * 60 * 60000;
 
       const dayTasks = allTasks.filter(t => !t.archived && isTaskRelevantInWindow(t, start, end));
-
-      // planned minutes for that day
       const planned = estimatePlannedMinutesInWindow(dayTasks, start, end);
 
-      // daily baseline
       const sleep = clampFloat(s.sleepHoursPerDay, 0, 24, DEFAULT_SETTINGS.sleepHoursPerDay) * 60;
       const isWorkDay = isWithinWorkPattern(day, s.workDaysPerWeek);
       const work = isWorkDay ? clampFloat(s.workHoursPerDay, 0, 24, DEFAULT_SETTINGS.workHoursPerDay) * 60 : 0;
@@ -1301,12 +1299,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function isWithinWorkPattern(dayDate, workDaysPerWeek) {
-    // Simple pattern: first N weekdays Mon..Sun
     const n = clampInt(workDaysPerWeek, 0, 7, 5);
     if (n === 0) return false;
-
-    // dayIndex Monday=0..Sunday=6
     const jsDay = dayDate.getDay(); // Sun=0
-    const dayIndex = jsDay === 0 ? 6 : jsDay - 1;
+    const dayIndex = jsDay === 0 ? 6 : jsDay - 1; // Monday=0..Sunday=6
     return dayIndex < n;
   }
+
+  // ---------- Initial load ----------
+  loadReminders();
+});
