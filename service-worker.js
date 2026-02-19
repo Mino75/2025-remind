@@ -80,7 +80,6 @@ const ASSETS = [
   '/index.html',
   '/styles.js',
   '/main.js',
-  '/uuid.js',
   '/manifest.json',
   '/favicon.ico',
   '/icon-192x192.png',
