@@ -81,7 +81,6 @@ const ASSETS = [
   '/styles.js',
   '/main.js',
   '/uuid.js',
-  '/db.js',
   '/manifest.json',
   '/favicon.ico',
   '/icon-192x192.png',
